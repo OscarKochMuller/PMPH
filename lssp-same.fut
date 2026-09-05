@@ -8,6 +8,13 @@
 -- output {
 --    5i32
 -- }
+--
+-- compiled input {
+--    [5i32,7i32,4i32,3i32,2i32,3i32,4i32,6i32,7i32,-3i32,4i32,6i32,8i32,6i32,6i32,6i32]
+-- }  
+-- output { 
+--    2
+-- }
 
 import "lssp"
 import "lssp-seq"
