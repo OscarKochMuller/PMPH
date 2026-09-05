@@ -16,7 +16,7 @@
 --    0
 -- }
 --
--- compiled input { [1000000]i32 }
+-- compiled random input { [1000000]i32 }
 
 import "lssp-seq"
 import "lssp"
