@@ -8,7 +8,7 @@
 -- output { 
 --    9
 -- }
--- entry: main seq
+--
 -- compiled input {
 --    [5,7,4,3,2,3,4,6,7,-3,4,6,8,6,6,6]
 -- }  
