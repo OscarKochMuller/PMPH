@@ -15,6 +15,9 @@
 -- output { 
 --    5
 -- }
+--
+-- compiled input { [1000000]i32 }
+
 
 import "lssp"
 import "lssp-seq"
