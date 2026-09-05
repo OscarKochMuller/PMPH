@@ -17,6 +17,8 @@
 -- }
 --
 -- compiled random input { [1000000]i32 }
+--
+-- compiled random input { [5000000]i32 }
 
 
 import "lssp"
