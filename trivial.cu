@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
 
     // a small number of dry runs
     for(int r = 0; r < 1; r++) {
-        mul2Kernel<<<grid , block>>>(d in , d_out , N ) ;
+        mul2Kernel<<<grid , block>>>(d_in , d_out , N ) ;
     }
   
     { // execute the kernel a number of times;
