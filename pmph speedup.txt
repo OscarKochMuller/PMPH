@@ -1,0 +1,60 @@
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=c lssp-same.fut -e seq
+Compiling lssp-same.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-same.fut:seq (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:          0μs (95% CI: [       0.0,        0.1])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:          0μs (95% CI: [       0.3,        0.4])
+[1000000]i32:                                   2017μs (95% CI: [    2016.1,     2017.5])
+[5000000]i32:                                  10083μs (95% CI: [   10078.8,    10090.1])
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=cuda lssp-same.fut -e main
+Compiling lssp-same.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-same.fut (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:         40μs (95% CI: [      39.6,       39.8])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:         39μs (95% CI: [      39.1,       39.3])
+[1000000]i32:                                     74μs (95% CI: [      73.4,       73.9])
+[5000000]i32:                                    138μs (95% CI: [     137.7,      137.8])
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=c lssp-sorted.fut -e seq
+Compiling lssp-sorted.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-sorted.fut:seq (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:          0μs (95% CI: [       0.0,        0.1])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:          0μs (95% CI: [       0.2,        0.2])
+[1000000]i32:                                   5370μs (95% CI: [    5365.3,     5375.2])
+[5000000]i32:                                  35327μs (95% CI: [   35303.2,    35358.7])
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=cuda lssp-sorted.fut -e main
+Compiling lssp-sorted.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-sorted.fut (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:         40μs (95% CI: [      39.5,       39.8])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:         39μs (95% CI: [      39.1,       39.3])
+[1000000]i32:                                     74μs (95% CI: [      73.4,       73.7])
+[5000000]i32:                                    139μs (95% CI: [     138.0,      142.4])
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=c lssp-zeros.fut -e seq
+Compiling lssp-zeros.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-zeros.fut:seq (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:          0μs (95% CI: [       0.1,        0.1])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:          0μs (95% CI: [       0.1,        0.1])
+[1000000]i32:                                   2789μs (95% CI: [    2788.0,     2791.0])
+[5000000]i32:                                  13952μs (95% CI: [   13944.3,    13969.7])
+[vxp942@hendrixfut03fl PMPH]$ futhark bench --backend=cuda lssp-zeros.fut -e main
+Compiling lssp-zeros.fut...
+Reporting arithmetic mean runtime of at least 10 runs for each dataset (min 0.5s).
+More runs automatically performed for up to 300s to ensure accurate measurement.
+
+lssp-zeros.fut (no tuning file):
+#0 ("[1i32, -2i32, -2i32, 0i32, 0i32,...:         42μs (95% CI: [      42.3,       42.4])
+#1 ("[5i32, 7i32, 4i32, 3i32, 2i32, 3...:         44μs (95% CI: [      44.1,       44.2])
+[1000000]i32:                                     77μs (95% CI: [      76.7,       76.9])
+[5000000]i32:                                    141μs (95% CI: [     139.6,      144.8])
