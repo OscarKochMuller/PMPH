@@ -12,7 +12,7 @@ __global__ void mul2Kernel (float * X, float * Y, int N) {
 // compute g l o b a l t h r e a d i d i n dimens ion x
 const unsigned int gid = blockIdx.x * blockDim.x + threadIdx.x ;
 if( gid < N ) { // don ’ t a c c e s s out o f bounds
-Y [ gid ] = 2 .0 * X[ gid ] ;
+Y [ gid ] = 2.0 * X[ gid ] ;
 }
 }
 
@@ -60,13 +60,13 @@ int main(int argc, char** argv) {
 
 
 
-    unsigned i n t B = 256; // chos e a s u i t a b l e b l o c k s i z e i n dimens ion x
-    unsigned i n t numblocks = (N + B - 1) / B; // number o f b l o c k s i n dimens ion x
-    dim3 block ( B ,1 ,1 ) , g r i d ( numblocks ,1 ,1 ) ; // total number of threads (numblocks*B) may overshoot N!
+    unsigned int B = 256; // chos e a s u i t a b l e b l o c k s i z e i n dimens ion x
+    unsigned int numblocks = (N + B - 1) / B; // number o f b l o c k s i n dimens ion x
+    dim3 block ( B ,1 ,1 ) , grid ( numblocks ,1 ,1 ) ; // total number of threads (numblocks*B) may overshoot N!
 
     // a small number of dry runs
     for(int r = 0; r < 1; r++) {
-        mul2Kernel<<<gr id , block>>>(d in , d out , N ) ;
+        mul2Kernel<<<grid , block>>>(d in , d_out , N ) ;
     }
   
     { // execute the kernel a number of times;
@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
         gettimeofday(&t_start, NULL);
 
         for(int r = 0; r < GPU_RUNS; r++) {
-            mul2Kernel<<< 1, N>>>(d_in, d_out);
+            mul2Kernel<<< 1, N>>>(d_in, d_out, N);
         }
         cudaDeviceSynchronize();
         // ^ `cudaDeviceSynchronize` is needed for runtime
