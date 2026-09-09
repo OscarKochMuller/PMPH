@@ -93,7 +93,6 @@ int main(int argc, char** argv) {
     unsigned int B = 256; // choose a suitable block size in dimension x
 
     unsigned int numblocks = (N + B - 1) / B; // number of blocks in dimension x
-
     
     dim3 block(B, 1, 1), grid(numblocks, 1, 1); // total number of threads (numblocks*B) may overshoot N!
     
