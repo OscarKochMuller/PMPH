@@ -180,15 +180,16 @@ template<class OP>
 __device__ inline typename OP::RedElTp
 scanIncWarp( volatile typename OP::RedElTp* ptr, const uint32_t idx ) {
     const uint32_t lane = idx & (WARP-1);
-	#pragma unroll
-    for (uint32_t i=0; i < lgWARP; i++){
-		const uint32_t p = 1 << i;
-		if (lane >= p) {
-			ptr[idx]= OP::apply(ptr[idx-p], ptr[idx]);
-		}
-	}
-	return OP::remVolatile(ptr[idx]);
+
+    if(lane==0) {
+        #pragma unroll
+        for(int i=1; i<WARP; i++) {
+            ptr[idx+i] = OP::apply(ptr[idx+i-1], ptr[idx+i]);
+        }
+    }
+    return OP::remVolatile(ptr[idx]);
 }
+
 
 /**
  * A CUDA-block of threads cooperatively scan with generic-binop `OP`

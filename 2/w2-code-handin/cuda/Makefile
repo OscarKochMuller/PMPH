@@ -26,6 +26,7 @@ run: $(PBB_MAIN) $(SPMV_MAIN)
 
 run_pbb: $(PBB_MAIN)
 	./$(PBB_MAIN) 100003565 256
+	./$(PBB_MAIN) 1000035650 256
 
 run_spmv: $(SPMV_MAIN)
 	./$(SPMV_MAIN) 11033 2076 256
