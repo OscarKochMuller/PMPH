@@ -38,7 +38,7 @@ let primesFlat (n: i64) : []i64 =
       
       let shp_sc = scan (+) 0 mult_lens
 			let shp_indss= map2 (-) shp_sc mult_lens
-			let flags = scatter (replicate flat_size 0i64) shp_indss mult_lens
+			let flags = scatter (replicate flat_size 0i64) shp_indss (replicate (length mult_lens) 1i64)
 			let p_starts = scatter (replicate flat_size 0i64) shp_indss sq_primes
 			let ps = map (\(_, p) -> p) (scan (\(x_flag, x) (y_flag, y) -> 
 				if y_flag != 0 then (y_flag, y) else (x_flag, x)) (0i64, 0i64) (zip flags p_starts))
