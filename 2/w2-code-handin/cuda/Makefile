@@ -10,7 +10,7 @@ default: compile run
 
 compile: $(PBB_MAIN) $(SPMV_MAIN)
 
-ELEMS_PER_THREAD=24
+ELEMS_PER_THREAD=6
 
 $(PBB_MAIN): pbb_main.cu host_skel.cuh pbb_kernels.cuh constants.cuh
 	$(COMPILER) $(OPT_FLAGS) -DELEMS_PER_THREAD=$(ELEMS_PER_THREAD) -o $(PBB_MAIN) $<
