@@ -42,7 +42,11 @@ void multiStepHisto ( uint32_t* d_inp_inds
      * it has roughly the same performance).
      ****************************************************************/
     {
-        multiStepKernel<<<grid,B>>>(d_inp_inds, d_inp_vals, d_hist, N, 0, H);
+        for (uint32_t i =0; i < num_partitions; i++) {
+            const uint32_t LB = i * CHUNK;
+            const uint32_t UB = min(LB + CHUNK, H);
+            multiStepKernel<<<grid,B>>>(d_inp_inds, d_inp_vals, d_hist, N, LB, UB);
+        }
     }
 }
 

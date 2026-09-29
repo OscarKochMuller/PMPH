@@ -43,7 +43,7 @@ multiStepKernel ( uint32_t* inp_inds
          * (less than UB and greater or equal to LB.)
          ************************/
         int H = UB;
-        if(ind < H) {
+        if(ind < H && ind>=LB) {
             float val = inp_vals[gid];
             atomicAdd((float*)&hist[ind], val);
         }
