@@ -95,6 +95,15 @@ naiveKernel(ElTp* A, ElTp* B, uint32_t num_rows, uint32_t num_cols) {
 template<class ElTp>
 __global__ void 
 transKernel(ElTp* A_tr, ElTp* B_tr, uint32_t num_rows, uint32_t num_cols) {
+    uint32_t gid = blockIdx.x*blockDim.x + threadIdx.x;
+    if(gid>=num_rows) return;
+    ElTp accum = 0;
+    for (int j=0; j<num_cols; j++) {
+        ElTp el_a =A_tr[j*num_rows + gid];
+        accum = sqrt(accum) + el_a * el_a ;
+
+        B_tr[j*num_rows+gid] = accum;
+    }
 }
 
 ///////////////////////////////////
