@@ -28,6 +28,9 @@ run_gpu: $(EXEC_GPU)
 run_cpu: $(EXEC_CPU)
 	./$(EXEC_CPU) 1048576
 
+run_cpu_seq: $(EXEC_CPU)
+	OMP_NUM_THREADS=1 ./$(EXEC_CPU) 1048576
+
 clean:
 	rm -f $(EXEC_GPU) $(EXEC_CPU)
 
