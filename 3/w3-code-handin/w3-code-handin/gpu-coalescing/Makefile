@@ -7,7 +7,7 @@ KERNELS = kernels.cu.h
 EXEC_GPU = coalesce-gpu
 EXEC_CPU = coalesce-cpu
 
-default: compile_cpu run_cpu run_cpu_seq compile_gpu run_gpu
+default: compile_cpu run_cpu compile_gpu run_gpu
 
 .cu.o: $(SOURCES_CPP) $(HELPERS)
 	$(CXX) -c $@ $<
