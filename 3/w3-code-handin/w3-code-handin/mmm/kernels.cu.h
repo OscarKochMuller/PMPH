@@ -154,13 +154,9 @@ __global__ void mmmSymBlkRegInnSeqKer(ElTp* A, ElTp* B, ElTp* C, int heightA, in
                  * This assumes of course that you have 
                  *   already solved Task 3.1.
                  ***************************************/
-                  for(int k = 0; k <Tk; k++) {
-                      #pragma unroll
-                      for(int i=0; i <Ry; i++) {
-                          #pragma unroll
-                          for(int j=0; j <Rx; j++){
-                              css[i][j] +=Aloc[threadIdx.y*Ry + i][k] * Bloc[k][threadIdx.x*Rx + j] ;
-                          }}}
+
+                  css[i][j] +=Aloc[threadIdx.y*Ry + i][k] * Bloc[k][threadIdx.x*Rx + j] ;
+                          
 
               }
           }
