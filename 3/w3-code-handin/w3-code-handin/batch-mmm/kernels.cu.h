@@ -98,6 +98,22 @@ void bmmmTiledKer ( ElTp* A,      ElTp* B, char* X_tr,   ElTp* Y
    * Remember to flatten the indices to all arrays
    * hold in global memory, i.e., A, B, X_tr, Y.
    ***********************************************/
-
+  for(int q = 0; q <N; q++) {
+    ElTp ab = A[j1*N + q] * B[q*K + j2];
+    int i = ii+flat_thid ;
+    if (flat_thid <T) {
+      char x = (i <M) ? X_tr[q*M + i] : 0;
+      Xsh_tr[flat_thid] = x;
 }
+    __syncthreads();
+    #pragma unroll
+    for(int ir= 0; ir <T;ir++) {
+      ElTp v = (Xsh_tr[ir] !=0) ? 1.0:0.0;
+      acc[ir] +=ab * v;}
+    __syncthreads();}
+  #pragma unroll
+  for(int ir = 0; ir <T; ir++) {
+    if (ii + ir <M)
+      Y[(ii + ir)*K*K + j1*K + j2] = acc[ir] ;
+  }}
 #endif
