@@ -302,7 +302,7 @@ static float time_ms(cudaEvent_t a,cudaEvent_t b) {float ms; cudaEventElapsedTim
 
 int main()
 {
-    const int sizes[]= {1000, 100000, 1000000, 10000000};
+    const int sizes[]= {1000, 100000, 1000000, 10000000, 100000000, 1000000000};
     const int RUNS = 10;
 
     std::mt19937 rng(12345);
