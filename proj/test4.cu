@@ -9,53 +9,154 @@
 
 #define CUDA_CHECK(call) do { cudaError_t err_ = (call); if (err_ != cudaSuccess) { fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, cudaGetErrorString(err_)); exit(EXIT_FAILURE); } } while (0)
 
-constexpr int B     = 256;
-constexpr int Q     = 22;
-constexpr int LGH   = 8;
-constexpr int H     = 1 << LGH;
-constexpr int TILE  = Q * B;
-constexpr int NW    = B / 32;
+//B = threads/block, Q = keys/thread, LGH = bits per pass, H = bins
+constexpr int B = 256;          
+constexpr int Q = 22;           
+constexpr int LGH= 8;            
+constexpr int H = 1 << LGH;      
+constexpr int TILE = Q * B;         
+constexpr int NW = B / 32;     
 constexpr uint32_t PAD_KEY = 0xFFFFFFFFu;
 
-static_assert(H == B, "code assumes one histogram bin per thread (H == B)");
+static_assert(H == B, "code assumes that we have one histogram bin per thread (H==B)");
 
 __host__ __device__ __forceinline__ int PADQ(int i) { return i + (i >> 5); }
-constexpr int TILE_SMEM = (TILE - 1) + ((TILE - 1) >> 5) + 1;
+constexpr int TILE_SMEM = (TILE - 1)+ ((TILE - 1) >> 5) + 1;
 
 
-__device__ __forceinline__ int block_exclusive_scan(int v, int* s_warp, int& total) {
-    const int lane = threadIdx.x & 31;
-    const int wid  = threadIdx.x >> 5;
+// The block-wide exclusive scan;
+__device__ __forceinline__ int block_exclusive_scan(int v, int* s_warp, int& total) 
+{
+    const int lane = threadIdx.x & 31 ;
+    const int wid = threadIdx.x >> 5;
 
-    int x = v;
+    int x = v;                                  
     #pragma unroll
-    for (int o = 1; o < 32; o <<= 1) {
+    for (int o = 1; o < 32; o <<= 1) 
+    {
         int y = __shfl_up_sync(0xFFFFFFFFu, x, o);
         if (lane >= o) x += y;
     }
-    if (lane == 31) s_warp[wid] = x;
+    if (lane == 31) s_warp[wid] =x ;            
     __syncthreads();
 
-    if (wid == 0) {
+    if (wid == 0){                              
         int w  = (lane < NW) ? s_warp[lane] : 0;
-        int xx = w;
+        int xx= w;
         #pragma unroll
-        for (int o = 1; o < 32; o <<= 1) {
-            int y = __shfl_up_sync(0xFFFFFFFFu, xx, o);
-            if (lane >= o) xx += y;
+        for (int o= 1; o < 32; o <<= 1) {
+            int y =__shfl_up_sync(0xFFFFFFFFu, xx, o);
+            if (lane>= o) xx += y;
         }
 
-        if (lane < NW)      s_warp[lane] = xx - w;
-        if (lane == NW - 1) s_warp[NW]   = xx;}
+
+        if (lane < NW) s_warp[lane] =xx - w;
+        if (lane == NW - 1) s_warp[NW]= xx ;}
     __syncthreads();
 
     int excl = x - v + s_warp[wid];
-    total    = s_warp[NW];
-    __syncthreads();
+    total = s_warp[NW];
+    __syncthreads();                           
     return excl;
 }
 
 
+
+constexpr int SCAN_SPT = 16;// elements per thread
+constexpr int SCAN_TILE= SCAN_SPT * B; // elements per block
+constexpr int SCAN_TILE_SMEM = (SCAN_TILE -1) + ((SCAN_TILE - 1) >> 5) + 1;
+
+// Scan 1:  the per-tile sums
+__global__ void __launch_bounds__(B)
+scan_reduce_kernel(const int* __restrict__ in, int* __restrict__ block_sums, int64_t N)
+{
+    __shared__ int s_warp[NW + 1];
+    const int64_t base = (int64_t)blockIdx.x * SCAN_TILE;
+
+    int sum = 0;
+    #pragma unroll
+    for (int i = 0; i < SCAN_SPT; i++) {
+
+        int64_t idx = base + (int64_t)i * B + threadIdx.x;
+        if (idx < N) sum += in[idx];
+    }
+    int total;
+    block_exclusive_scan(sum, s_warp, total);
+
+    if (threadIdx.x == 0) block_sums[blockIdx.x] =total;
+}
+// Scan 2:  scan the tile sums into the tile offsets
+__global__ void __launch_bounds__(B)
+scan_block_sums_kernel(int* __restrict__ sums, int num_sums)
+{
+    __shared__ int s_warp[NW + 1];
+
+    int carry= 0;
+    for (int base = 0; base <num_sums; base += B) {
+        const int idx = base +threadIdx.x;
+        int v= (idx < num_sums) ? sums[idx] : 0;
+        int total;
+        int excl= block_exclusive_scan(v, s_warp, total);
+        if (idx < num_sums) sums[idx] = excl +carry;
+        carry += total;
+    }
+}
+// Scan 3:  scan each tile and add their offset
+__global__ void __launch_bounds__(B)
+scan_apply_kernel(const int* __restrict__ in, int* __restrict__ out,const int* __restrict__ block_offsets, int64_t N)
+{
+    __shared__ int tile[SCAN_TILE_SMEM];
+    __shared__ int s_warp[NW + 1];
+
+    const int tid = threadIdx.x;
+    const int64_t base = (int64_t)blockIdx.x *SCAN_TILE;
+
+
+    #pragma unroll
+    for (int i = 0; i < SCAN_SPT; i++) {
+        int64_t idx = base + (int64_t)i * B + tid ;
+        tile[PADQ(i * B + tid)] = (idx < N) ? in[idx] : 0 ;
+    }
+    __syncthreads();
+
+    // each thread will take SCAN_SPT contiguous elements
+    int reg[SCAN_SPT];
+    int sum = 0;
+    #pragma unroll
+    for (int i = 0; i < SCAN_SPT; i++) {
+        reg[i] = tile[PADQ(tid *SCAN_SPT + i)];
+        sum += reg[i];}
+
+    int total;
+    int run = block_exclusive_scan(sum, s_warp, total) + block_offsets[blockIdx.x];
+
+    #pragma unroll
+    for (int i = 0; i < SCAN_SPT; i++) {
+        tile[PADQ(tid *SCAN_SPT + i)] = run;
+        run += reg[i];
+    }
+    __syncthreads();
+
+    //store coalesced
+    #pragma unroll
+    for (int i = 0; i < SCAN_SPT;i++) {
+        int64_t idx = base + (int64_t)i * B + tid;
+        if (idx < N) out[idx] = tile[PADQ(i * B + tid)];
+    }
+}
+
+static inline int scan_num_tiles(size_t N) { return (int)((N + SCAN_TILE - 1) / SCAN_TILE); }
+
+// d_block_sums shall hold scan_num_tiles(N) ints
+static void device_exclusive_scan(const int* d_in, int* d_out, size_t N, int* d_block_sums)
+{
+    const int tiles = scan_num_tiles(N);
+    scan_reduce_kernel <<<tiles, B>>>(d_in, d_block_sums, (int64_t)N);
+    scan_block_sums_kernel <<<1, B>>>(d_block_sums, tiles);
+    scan_apply_kernel <<<tiles, B>>>(d_in, d_out, d_block_sums, (int64_t)N);
+}
+
+// Per block digit histogram
 __global__ void __launch_bounds__(B)
 kernel1_histogram(const uint32_t* __restrict__ val_in, int* __restrict__ hist_2D,int n, int bit_offset)
 {
@@ -68,16 +169,15 @@ kernel1_histogram(const uint32_t* __restrict__ val_in, int* __restrict__ hist_2D
 
     #pragma unroll
     for (int i = 0; i < Q; i++) {
-        int64_t idx = tile_start + (int64_t)i * B + tid;
+        int64_t idx = tile_start + (int64_t)i * B + tid;      
         if (idx < n) {
             uint32_t digit = (val_in[idx] >> bit_offset) & (H - 1);
             atomicAdd(&shared_histogram[digit], 1);
-        }
-    }
+        }}
     __syncthreads();
 
     for (int k = tid; k < H; k += B)
-        hist_2D[blockIdx.x * H + k] = shared_histogram[k];
+        hist_2D[blockIdx.x * H + k] =shared_histogram[k];   
 }
 
 __global__ void transpose_kernel(const int* __restrict__ in, int* __restrict__ out, int rows, int cols)
@@ -91,7 +191,7 @@ __global__ void transpose_kernel(const int* __restrict__ in, int* __restrict__ o
     x = blockIdx.y * 32 + threadIdx.x;
     y = blockIdx.x * 32 + threadIdx.y;
     for (int j = 0; j < 32; j += 8)
-        if (x < rows && y + j < cols) out[(size_t)(y + j) * rows + x] = t[threadIdx.x][threadIdx.y + j];
+        if (x < rows && y + j < cols) out[(size_t)(y + j) * rows + x] = t[threadIdx.x][threadIdx.y+ j];
 }
 
 
@@ -128,12 +228,12 @@ kernel2_partition_scatter(const uint32_t* __restrict__ val_in, uint32_t* __restr
         for (int i = 0; i < Q; i++) cnt += (((reg[i] >> bit) & 1u) == 0u);
 
         int total_true;
-        int run_true  = block_exclusive_scan(cnt, s_warp, total_true);
+        int run_true = block_exclusive_scan(cnt, s_warp, total_true);
         int run_false = tid * Q - run_true;
 
         #pragma unroll
         for (int i = 0; i < Q; i++) {
-            bool p = (((reg[i] >> bit) & 1u) == 0u);
+            bool p =(((reg[i] >> bit) & 1u) == 0u);
             int dest;
             if (p) { dest = run_true;run_true++;}
             else   { dest = total_true + run_false; run_false++; }
@@ -141,17 +241,15 @@ kernel2_partition_scatter(const uint32_t* __restrict__ val_in, uint32_t* __restr
         }
         __syncthreads();
 
-        if (b < LGH -1) {
+        if (b < LGH -1) {                
             #pragma unroll
-            for (int i = 0; i < Q; i++) reg[i] = tile[PADQ(tid * Q + i)];
+            for (int i = 0; i < Q;i++) reg[i] = tile[PADQ(tid * Q + i)];
             __syncthreads();
-        }
-    }
-
-    {
+        }}
+{
         int h = hist_2D[blockIdx.x * H + tid];
         int dummy;
-        local_hist[tid] = block_exclusive_scan(h, s_warp, dummy);
+        local_hist[tid] = block_exclusive_scan(h, s_warp, dummy);   
         global_off[tid] = scanned_T[(size_t)tid * num_blocks + blockIdx.x];
     }
     __syncthreads();
@@ -161,7 +259,7 @@ kernel2_partition_scatter(const uint32_t* __restrict__ val_in, uint32_t* __restr
         int pos = i * B + tid;
         if (pos < valid) {
             uint32_t key =tile[PADQ(pos)];
-            int d = (key >> bit_offset) & (H - 1);
+            int d = (key >>bit_offset) & (H - 1);
             val_out[global_off[d] + (pos - local_hist[d])] = key;
         }}}
 
@@ -177,10 +275,8 @@ void radix_sort(uint32_t* d_in, uint32_t* d_out, int n)
     CUDA_CHECK(cudaMalloc(&hist_T,    hist_sz *sizeof(int)));
     CUDA_CHECK(cudaMalloc(&scanned_T, hist_sz * sizeof(int)));
 
-    void*  d_temp = nullptr;
-    size_t temp_bytes = 0;
-    cub::DeviceScan::ExclusiveSum(d_temp, temp_bytes, hist_T, scanned_T, (int)hist_sz);
-    CUDA_CHECK(cudaMalloc(&d_temp, temp_bytes));
+    int* d_block_sums = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_block_sums, (size_t)scan_num_tiles(hist_sz) * sizeof(int)));
 
     dim3 tr_block(32, 8), tr_grid(H / 32, (num_blocks + 31) / 32);
 
@@ -189,9 +285,8 @@ void radix_sort(uint32_t* d_in, uint32_t* d_out, int n)
     for (int bit_offset = 0; bit_offset < 32; bit_offset += LGH) {
         kernel1_histogram<<<num_blocks, B>>>(src, hist_2D, n, bit_offset);
         transpose_kernel<<<tr_grid, tr_block>>>(hist_2D,hist_T, num_blocks, H);
-        cub::DeviceScan::ExclusiveSum(d_temp, temp_bytes, hist_T, scanned_T, (int)hist_sz);
-        kernel2_partition_scatter<<<num_blocks, B>>>(src, dst, hist_2D, scanned_T,
-                                                     n, bit_offset, num_blocks);
+        device_exclusive_scan(hist_T, scanned_T, hist_sz, d_block_sums);
+        kernel2_partition_scatter<<<num_blocks, B>>>(src, dst, hist_2D, scanned_T,n, bit_offset, num_blocks);
         std::swap(src, dst);
     }
     CUDA_CHECK(cudaMemcpy(d_out, src, (size_t)n * sizeof(uint32_t), cudaMemcpyDeviceToDevice));
@@ -200,106 +295,81 @@ void radix_sort(uint32_t* d_in, uint32_t* d_out, int n)
     CUDA_CHECK(cudaFree(hist_2D));
     CUDA_CHECK(cudaFree(hist_T));
     CUDA_CHECK(cudaFree(scanned_T));
-    CUDA_CHECK(cudaFree(d_temp));
+    CUDA_CHECK(cudaFree(d_block_sums));
 }
 
-static float time_ms(cudaEvent_t a, cudaEvent_t b) {float ms; cudaEventElapsedTime(&ms, a, b); return ms; }
-
-enum class DataKind { Random, AllSame };
-
-// Runs validation + timing of the custom radix sort and CUB on one input.
-//   kind == Random  : uniformly random uint32 keys
-//   kind == AllSame : every key equals `const_val` (e.g. 100M copies of 3)
-static void run_case(const char* label, int n, DataKind kind, uint32_t const_val,
-                     std::mt19937& rng, cudaEvent_t e0, cudaEvent_t e1, int RUNS)
-{
-    std::vector<uint32_t> h(n), ref;
-    if (kind == DataKind::AllSame) {
-        std::fill(h.begin(), h.end(), const_val);
-        ref = h;                                   // already sorted, skip std::sort
-    } else {
-        for (auto& x : h) x = rng();
-        ref = h;
-        std::sort(ref.begin(), ref.end());
-    }
-
-    uint32_t *d_orig, *d_in, *d_out, *d_cub_in, *d_cub_out;
-    CUDA_CHECK(cudaMalloc(&d_orig,(size_t)n * 4));
-    CUDA_CHECK(cudaMalloc(&d_in, (size_t)n * 4));
-    CUDA_CHECK(cudaMalloc(&d_out, (size_t)n * 4));
-    CUDA_CHECK(cudaMalloc(&d_cub_in,(size_t)n * 4));
-    CUDA_CHECK(cudaMalloc(&d_cub_out, (size_t)n * 4));
-    CUDA_CHECK(cudaMemcpy(d_orig, h.data(), (size_t)n * 4, cudaMemcpyHostToDevice));
-
-    // ---- custom radix sort: correctness ----
-    CUDA_CHECK(cudaMemcpy(d_in, d_orig, (size_t)n * 4, cudaMemcpyDeviceToDevice));
-    radix_sort(d_in, d_out, n);
-    CUDA_CHECK(cudaDeviceSynchronize());
-    std::vector<uint32_t> res(n);
-    CUDA_CHECK(cudaMemcpy(res.data(), d_out, (size_t)n * 4, cudaMemcpyDeviceToHost));
-    bool ok = (res == ref);
-
-    // ---- custom radix sort: timing ----
-    float t_opt = 0;
-    for (int r = 0; r < RUNS; r++) {
-        CUDA_CHECK(cudaMemcpy(d_in, d_orig, (size_t)n * 4, cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaDeviceSynchronize());
-        cudaEventRecord(e0);
-        radix_sort(d_in, d_out, n);
-        cudaEventRecord(e1); cudaEventSynchronize(e1);
-        t_opt += time_ms(e0, e1);}
-    t_opt /= RUNS;
-
-    // ---- CUB: correctness ----
-    void* d_tmp = nullptr; size_t tmp_bytes = 0;
-    CUDA_CHECK(cudaMemcpy(d_cub_in, d_orig, (size_t)n * 4,cudaMemcpyDeviceToDevice));
-    CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
-    CUDA_CHECK(cudaDeviceSynchronize());
-    CUDA_CHECK(cudaMalloc(&d_tmp, tmp_bytes));
-
-    CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    std::vector<uint32_t> cub_res(n);
-    CUDA_CHECK(cudaMemcpy(cub_res.data(), d_cub_out,(size_t)n * sizeof(uint32_t),cudaMemcpyDeviceToHost));
-    bool cub_ok = (cub_res == ref);
-
-    // ---- CUB: timing ----
-    float t_cub = 0;
-    for (int r = 0; r < RUNS;r++) {
-        CUDA_CHECK(cudaMemcpy(d_cub_in, d_orig, (size_t)n *4, cudaMemcpyDeviceToDevice));
-        CUDA_CHECK(cudaDeviceSynchronize());
-        CUDA_CHECK(cudaEventRecord(e0));
-        CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
-        CUDA_CHECK(cudaEventRecord(e1));
-        CUDA_CHECK(cudaEventSynchronize(e1));
-        t_cub += time_ms(e0,e1);
-    }
-    t_cub /= RUNS;
-
-    printf("%-14s %12d %12.3f %12.3f %10.2f opt=%s CUB=%s\n",
-           label, n, t_opt, t_cub, t_opt / t_cub, ok ? "OK" : "FAIL", cub_ok ? "OK" : "FAIL");
-
-    cudaFree(d_orig); cudaFree(d_in); cudaFree(d_out);
-    cudaFree(d_cub_in); cudaFree(d_cub_out); cudaFree(d_tmp);
-}
+static float time_ms(cudaEvent_t a,cudaEvent_t b) {float ms; cudaEventElapsedTime(&ms, a, b); return ms; }
 
 int main()
 {
-    const int sizes[] = {1000, 100000, 1000000, 10000000, 50000000, 100000000,1000000000};
+    const int sizes[]= {1000, 100000, 1000000, 10000000};
     const int RUNS = 10;
 
     std::mt19937 rng(12345);
     cudaEvent_t e0, e1;
     cudaEventCreate(&e0); cudaEventCreate(&e1);
 
-    printf("%-14s %12s %12s %12s %10s %8s\n", "case", "n", "opt [ms]", "CUB [ms]", "opt/CUB", "valid");
+    printf("%12s %12s %12s %10s %8s\n", "n", "opt [ms]", "CUB [ms]", "opt/CUB", "valid");
+    for (int n : sizes) {
+        std::vector<uint32_t> h(n), ref;
+        for (auto& x : h) x = rng();
+        ref = h;
+        std::sort(ref.begin(), ref.end());
 
-    // Original random-key benchmarks
-    for (int n : sizes)
-        run_case("random", n, DataKind::Random, 0, rng, e0, e1, RUNS);
+        uint32_t *d_orig, *d_in, *d_out, *d_cub_in, *d_cub_out;
+        CUDA_CHECK(cudaMalloc(&d_orig,(size_t)n * 4));
+        CUDA_CHECK(cudaMalloc(&d_in, (size_t)n * 4));
+        CUDA_CHECK(cudaMalloc(&d_out, (size_t)n * 4));
+        CUDA_CHECK(cudaMalloc(&d_cub_in,(size_t)n * 4));
+        CUDA_CHECK(cudaMalloc(&d_cub_out, (size_t)n * 4));
+        CUDA_CHECK(cudaMemcpy(d_orig, h.data(), (size_t)n * 4, cudaMemcpyHostToDevice));
 
-    // New test case: 100 million elements, every one equal to 3
-    run_case("all-3s", 100000000, DataKind::AllSame, 3u, rng, e0, e1, RUNS);
+        CUDA_CHECK(cudaMemcpy(d_in, d_orig, (size_t)n * 4, cudaMemcpyDeviceToDevice));
+        radix_sort(d_in, d_out, n);
+        CUDA_CHECK(cudaDeviceSynchronize());
+        std::vector<uint32_t> res(n);
+        CUDA_CHECK(cudaMemcpy(res.data(), d_out, (size_t)n * 4, cudaMemcpyDeviceToHost));
+        bool ok = (res == ref);
 
+        float t_opt = 0;
+        for (int r = 0; r < RUNS; r++) {
+            CUDA_CHECK(cudaMemcpy(d_in, d_orig, (size_t)n * 4, cudaMemcpyDeviceToDevice));
+            CUDA_CHECK(cudaDeviceSynchronize());
+            cudaEventRecord(e0);
+            radix_sort(d_in, d_out, n);
+            cudaEventRecord(e1); cudaEventSynchronize(e1);
+            t_opt += time_ms(e0, e1);}
+        t_opt /= RUNS;
+
+        void* d_tmp = nullptr; size_t tmp_bytes = 0;
+        CUDA_CHECK(cudaMemcpy(d_cub_in, d_orig, (size_t)n * 4,cudaMemcpyDeviceToDevice));
+        CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaMalloc(&d_tmp, tmp_bytes));
+
+        CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        std::vector<uint32_t> cub_res(n);
+        CUDA_CHECK(cudaMemcpy(cub_res.data(), d_cub_out,(size_t)n * sizeof(uint32_t),cudaMemcpyDeviceToHost));
+        bool cub_ok = (cub_res == ref);
+
+        float t_cub = 0;
+        for (int r = 0; r < RUNS;r++) {
+            CUDA_CHECK(cudaMemcpy(d_cub_in, d_orig, (size_t)n *4, cudaMemcpyDeviceToDevice));
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaEventRecord(e0));
+            CUDA_CHECK(cub::DeviceRadixSort::SortKeys(d_tmp, tmp_bytes, d_cub_in, d_cub_out, n));
+            CUDA_CHECK(cudaEventRecord(e1));
+            CUDA_CHECK(cudaEventSynchronize(e1));
+            t_cub += time_ms(e0,e1);
+        }
+        t_cub /= RUNS;
+        
+
+        printf("%12d %12.3f %12.3f %10.2f opt=%s CUB=%s\n",n, t_opt, t_cub, t_opt / t_cub,ok ? "OK" : "FAIL",cub_ok ? "OK" : "FAIL");
+
+        cudaFree(d_orig); cudaFree(d_in); cudaFree(d_out);
+        cudaFree(d_cub_in); cudaFree(d_cub_out); cudaFree(d_tmp);
+    }
     return 0;}
