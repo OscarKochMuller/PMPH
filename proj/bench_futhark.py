@@ -42,19 +42,16 @@ for n in sizes:
         if not os.path.exists(p):
             sys.exit("missing %s (run the CUDA program first)" % p)
 
-    rs_times, ms_times = [], []
-    rs_ok = ms_ok = True
+    rs_times = []
+    rs_ok = True
     for p in paths:
         rs_times.append(time_ms("rs", p))
-        ms_times.append(time_ms("ms", p))
         rs_ok = rs_ok and is_ok("rs_ok", p)
-        ms_ok = ms_ok and is_ok("ms_ok", p)
 
-    print("\n=== n = %d  (radix=%s, merge=%s) ===" % (n, "OK" if rs_ok else "FAIL", "OK" if ms_ok else "FAIL"))
-    print("%6s %12s %12s %10s" % ("run", "radix [ms]", "merge [ms]", "merge/radix"))
+    print("\n=== n = %d  (radix=%s) ===" % (n, "OK" if rs_ok else "FAIL"))
+    print("%6s %12s" % ("run", "radix [ms]"))
     for r in range(RUNS):
-        print("%6d %12.3f %12.3f %10.2f" % (r, rs_times[r], ms_times[r], ms_times[r] / rs_times[r]))
+        print("%6d %12.3f" % (r, rs_times[r]))
     t_rs, h_rs = mean_ci(rs_times)
-    t_ms, h_ms = mean_ci(ms_times)
-    print("%6s %12.3f %12.3f %10.2f" % ("avg", t_rs, t_ms, t_ms / t_rs))
-    print("%6s [%.3f, %.3f] [%.3f, %.3f]" % ("95%CI", t_rs - h_rs, t_rs + h_rs, t_ms - h_ms, t_ms + h_ms))
+    print("%6s %12.3f" % ("avg", t_rs))
+    print("%6s [%.3f, %.3f]" % ("95%CI", t_rs - h_rs, t_rs + h_rs))
