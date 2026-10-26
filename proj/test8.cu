@@ -398,7 +398,7 @@ int main()
         }
         float ci_cub = T_CRIT_95 * sqrtf(var_cub / (RUNS - 1)) / sqrtf((float)RUNS);
         float ci_opt = T_CRIT_95 * sqrtf(var_opt / (RUNS - 1)) / sqrtf((float)RUNS);
-        printf("%6s %12.3f %12.3f\n", "+-95%", ci_cub, ci_opt);
+        printf("%6s [%.3f, %.3f] [%.3f, %.3f]\n", "95%CI", t_cub - ci_cub, t_cub + ci_cub, t_opt - ci_opt, t_opt + ci_opt);
 
         cudaFree(d_in); cudaFree(d_out);
         cudaFree(d_cub_in); cudaFree(d_cub_out); cudaFree(d_tmp);
